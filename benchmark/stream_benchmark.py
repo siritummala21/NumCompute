@@ -21,6 +21,7 @@ import datetime
 import json
 import os
 import platform
+import subprocess
 import sys
 
 import matplotlib
@@ -44,6 +45,20 @@ from numcompute_stream.tree import best_split_loop, best_split_vectorised  # noq
 
 OUT = os.path.join(os.path.dirname(__file__), "stream_results")
 SEEDS = (42, 1, 2)                     # seed 42 is the CSV used in the demo
+RUN = {}                               # run time, commit and machine, filled in main()
+
+
+def git_commit():
+    """Short hash of the code being benchmarked, so each table can be tied to it."""
+    try:
+        out = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT,
+                             capture_output=True, text=True, check=True).stdout.strip()
+        dirty = subprocess.run(["git", "status", "--porcelain", "--", "numcompute",
+                                "numcompute_stream", "benchmark/stream_benchmark.py"],
+                               cwd=ROOT, capture_output=True, text=True).stdout.strip()
+        return out + ("+changes" if dirty else "")
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
 
 
 def time_best(fn, repeat):
@@ -115,7 +130,9 @@ def write_table(name, rows):
         writer.writeheader()
         writer.writerows(rows)
     keys = list(rows[0])
-    lines = ["| " + " | ".join(keys) + " |", "|" + "---|" * len(keys)]
+    run_line = (f"Run {RUN['run']} · commit {RUN['commit']} · {RUN['machine']} · "
+                f"Python {RUN['python']}, NumPy {RUN['numpy']}")
+    lines = [run_line, "", "| " + " | ".join(keys) + " |", "|" + "---|" * len(keys)]
     for r in rows:
         lines.append("| " + " | ".join(f"{v:.4g}" if isinstance(v, float) else str(v)
                                        for v in r.values()) + " |")
@@ -173,8 +190,8 @@ def bench_loop_vs_vectorised(quick):
     ax.invert_yaxis()
     for i, r in enumerate(rows):
         ax.text(r["speedup"] * 1.08, i, f"{r['speedup']:.0f}x", va="center", fontsize=8)
-    ax.set_title("Vectorised speed-up over the loop version (best times)", loc="left")
-    ax.set_xlabel("Speed-up (log scale)")
+    ax.set_title("Vectorised speed-up over the loop version (ratio of best times)", loc="left")
+    ax.set_xlabel(f"Speed-up (log scale), run {RUN['run']}, commit {RUN['commit']}")
     fig.tight_layout()
     fig.savefig(os.path.join(OUT, "loop_vs_vectorised.png"), dpi=150)
     plt.close(fig)
@@ -240,9 +257,12 @@ def main():
     quick = parser.parse_args().quick
     os.makedirs(OUT, exist_ok=True)
     env = {"run": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+           "commit": git_commit(),
            "python": platform.python_version(), "numpy": np.__version__,
            "matplotlib": matplotlib.__version__, "os": f"{platform.system()} {platform.release()}",
-           "machine": platform.machine(), "cpu_count": os.cpu_count(), "quick": quick}
+           "machine": f"{platform.system()} {platform.machine()}, {os.cpu_count()} CPUs",
+           "cpu_count": os.cpu_count(), "quick": quick}
+    RUN.update(env)
     loop_rows = bench_loop_vs_vectorised(quick)
     buffer_rows = bench_buffer_sizes(quick)
     strategy_rows = bench_strategies()
