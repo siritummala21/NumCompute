@@ -209,6 +209,8 @@ class StreamingAUC:
             if positive.all() or not positive.any():
                 return float("nan")
             return float(_group.roc_auc_score(positive.astype(int), s))
+        if self.classes is None or len(self.classes) != s.shape[1]:
+            raise ValueError("A score matrix needs classes=[...] with one label per column.")
         aucs = []
         for k, c in enumerate(self.classes):
             positive = y == c

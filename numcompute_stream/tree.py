@@ -143,7 +143,7 @@ def best_split_loop(X, y, n_classes, features, criterion="gini", min_samples_lea
 SPLITTERS = {"vectorised": best_split_vectorised, "loop": best_split_loop}
 
 
-class DecisionTreeClassifier(BaseEstimator, ClassifierMixin):
+class DecisionTreeClassifier(ClassifierMixin, BaseEstimator):
     """Decision tree classifier with buffered streaming retraining.
 
     Parameters
