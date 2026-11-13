@@ -1,0 +1,25 @@
+{
+ "run": "2026-11-13T06:52:04Z",
+ "python": "3.14.6",
+ "numpy": "2.5.4",
+ "matplotlib": "3.11.2",
+ "os": "Darwin 25.6.0",
+ "machine": "arm64",
+ "cpu_count": 8,
+ "quick": false,
+ "split_speedup_smallest": 122.62651160893203,
+ "split_n_smallest": 250,
+ "split_speedup_largest": 248.41863944676265,
+ "split_n_largest": 2000,
+ "tree_fit_speedup": 138.77707121695894,
+ "predict_speedup": 55.51836155328493,
+ "stream_speedup": 24.44527894547589,
+ "best_buffer_size": 250,
+ "best_buffer_accuracy": 0.7352046783625731,
+ "buffer_500_accuracy": 0.7329090909090908,
+ "strategy_accuracy": {
+  "train once": 0.5478181818181819,
+  "buffered (500)": 0.7329090909090908,
+  "buffered + DDM (500)": 0.7523030303030303
+ }
+}
