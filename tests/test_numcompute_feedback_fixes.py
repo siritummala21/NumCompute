@@ -7,6 +7,8 @@ expected answer:
   ([1e-16, 2e-16, 3e-16]) to unit variance.
 * Euclidean distance between 1e9 and 1e9 + 1 must be 1, not 0.
 * grad / jacobian must reject a NaN (or otherwise invalid) step size.
+* A minimal external transformer with ``fit(X)`` only must work in
+  Pipeline, FeatureUnion and ColumnTransformer.
 
 Written with ``unittest`` so it runs under both pytest and
 ``python -m unittest``.
@@ -18,6 +20,7 @@ import warnings
 import numpy as np
 
 from numcompute.optim import grad, gradient_descent, jacobian, line_search
+from numcompute.pipeline import ColumnTransformer, FeatureUnion, Pipeline
 from numcompute.preprocessing import MinMaxScaler, StandardScaler
 from numcompute.utils import pairwise_distances
 
@@ -110,6 +113,36 @@ class TestOptimiserStepValidation(unittest.TestCase):
             gradient_descent(self.quad, [1.0], alpha0=0.0)
         result = gradient_descent(self.quad, [3.0, -1.0])
         np.testing.assert_allclose(result["x"], [0.0, 0.0], atol=1e-6)
+
+
+class FitOnlyCentre:
+    """Minimal external transformer: fit(X) without y, returning None."""
+
+    def fit(self, X):
+        self.mean_ = np.asarray(X, dtype=float).mean(axis=0)
+
+    def transform(self, X):
+        return np.asarray(X, dtype=float) - self.mean_
+
+
+class TestFitOnlyTransformerCompatibility(unittest.TestCase):
+
+    def setUp(self):
+        self.X = np.array([[1.0, 10.0], [3.0, 30.0]])
+
+    def test_pipeline(self):
+        out = Pipeline([("a", FitOnlyCentre()), ("b", FitOnlyCentre())]).fit_transform(self.X)
+        np.testing.assert_array_equal(out, [[-1.0, -10.0], [1.0, 10.0]])
+        pipe = Pipeline([("a", FitOnlyCentre()), ("b", FitOnlyCentre())]).fit(self.X, [0, 1])
+        np.testing.assert_array_equal(pipe.transform([[2.0, 20.0]]), [[0.0, 0.0]])
+
+    def test_feature_union(self):
+        fu = FeatureUnion([("a", FitOnlyCentre()), ("b", FitOnlyCentre())]).fit(self.X)
+        np.testing.assert_array_equal(fu.transform([[2.0, 20.0]]), [[0.0, 0.0, 0.0, 0.0]])
+
+    def test_column_transformer(self):
+        ct = ColumnTransformer([("a", FitOnlyCentre(), [0])], remainder="passthrough")
+        np.testing.assert_array_equal(ct.fit_transform(self.X), [[-1.0, 10.0], [1.0, 30.0]])
 
 
 if __name__ == "__main__":

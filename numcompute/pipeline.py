@@ -53,7 +53,37 @@ class TransformerMixin:
     
 
     def fit_transform(self, X, y=None) -> np.ndarray:
-        return self.fit(X, y).transform(X)
+        _fit(self, X, y)            # works for subclasses whose fit takes X only
+        return self.transform(X)
+
+
+def _accepts_y(method) -> bool:
+    """Whether a bound ``fit``-like method takes ``y`` as a second positional argument."""
+    try:
+        params = list(inspect.signature(method).parameters.values())
+    except (TypeError, ValueError):
+        return True
+    positional = [p for p in params if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)]
+    return any(p.kind == p.VAR_POSITIONAL for p in params) or len(positional) >= 2
+
+
+def _fit(est, X, y=None):
+    """Call ``est.fit`` with or without ``y``, as its signature allows.
+
+    External transformers often define ``fit(self, X)`` only, and may return
+    ``None`` instead of ``self``; neither should break a pipeline
+    (Assignment 2.1 feedback).
+    """
+    return est.fit(X, y) if _accepts_y(est.fit) else est.fit(X)
+
+
+def _fit_transform(est, X, y=None):
+    """Fit then transform ``X`` with any transformer; never chains on fit's return value."""
+    if hasattr(est, "fit_transform"):
+        method = est.fit_transform
+        return method(X, y) if _accepts_y(method) else method(X)
+    _fit(est, X, y)
+    return est.transform(X)
 
 
 def _is_transformer(obj) -> bool:
@@ -113,7 +143,7 @@ class Pipeline(BaseEstimator):
         for _, est in self.steps[:-1]:
             if _is_passthrough(est):
                 continue
-            Xt = est.fit_transform(Xt, y) if hasattr(est, "fit_transform") else est.fit(Xt, y).transform(Xt)
+            Xt = _fit_transform(est, Xt, y)
         return Xt
 
     def _transform_head(self, X):
@@ -128,7 +158,7 @@ class Pipeline(BaseEstimator):
         Xt = self._fit_transform_head(X, y)
         last = self.steps[-1][1]
         if not _is_passthrough(last):
-            last.fit(Xt, y)
+            _fit(last, Xt, y)
         return self
 
     def fit_transform(self, X, y=None) -> np.ndarray:
@@ -138,7 +168,7 @@ class Pipeline(BaseEstimator):
             return Xt
         if not hasattr(last, "transform"):
             raise AttributeError(f"Final step {type(last).__name__} has no transform method.")
-        return last.fit_transform(Xt, y) if hasattr(last, "fit_transform") else last.fit(Xt, y).transform(Xt)
+        return _fit_transform(last, Xt, y)
 
     def transform(self, X) -> np.ndarray:
         Xt = self._transform_head(X)
@@ -192,7 +222,7 @@ class FeatureUnion(BaseEstimator, TransformerMixin):
 
     def fit(self, X, y=None) -> "FeatureUnion":
         for _, t in self.transformer_list:
-            t.fit(X, y)
+            _fit(t, X, y)
         return self
 
     def transform(self, X) -> np.ndarray:
@@ -242,7 +272,7 @@ class ColumnTransformer(BaseEstimator, TransformerMixin):
             if _is_passthrough(t):
                 outs.append(sub)
             elif fit:
-                outs.append(_as_2d(t.fit_transform(sub, y)))
+                outs.append(_as_2d(_fit_transform(t, sub, y)))
             else:
                 outs.append(_as_2d(t.transform(sub)))
         if self.remainder == "passthrough" and (~used).any():
