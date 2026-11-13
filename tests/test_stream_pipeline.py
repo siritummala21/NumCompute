@@ -113,3 +113,15 @@ def test_pipeline_errors():
     ct.partial_fit([[1.0, 2.0]])
     with pytest.raises(ValueError):
         ct.transform([[1.0]])
+
+
+def test_transform_only_step_is_allowed(rng):
+    class Double:                                      # no fit at all
+        def transform(self, X):
+            return np.asarray(X, dtype=float) * 2
+
+    X, y = make_blobs(100, rng)
+    streamed = Pipeline([("double", Double()), ("tree", DecisionTreeClassifier(buffer_size=50))])
+    streamed.partial_fit(X[:50], y[:50]).partial_fit(X[50:], y[50:])
+    batch = Pipeline([("double", Double()), ("tree", DecisionTreeClassifier())]).fit(X, y)
+    assert streamed.score(X, y) > 0.8 and batch.score(X, y) == 1.0

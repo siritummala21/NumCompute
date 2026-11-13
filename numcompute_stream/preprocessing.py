@@ -147,10 +147,12 @@ class MinMaxScaler(TransformerMixin, _group.MinMaxScaler):
         return self
 
     def _range(self):
+        # Work with half values: hi - lo overflows for a range like
+        # [-1e308, 1e308], but hi/2 - lo/2 does not, and halving is exact.
         lo = np.where(np.isfinite(self._stats.min_), self._stats.min_, 0.0)
         hi = np.where(np.isfinite(self._stats.max_), self._stats.max_, lo)
-        span = np.where(hi > lo, hi - lo, 1.0)            # exact constant test
-        return lo, span
+        half_span = np.where(hi > lo, hi / 2 - lo / 2, 1.0)    # exact constant test
+        return lo, half_span
 
     def transform(self, X):
         """Scale X into ``feature_range``.
@@ -158,17 +160,17 @@ class MinMaxScaler(TransformerMixin, _group.MinMaxScaler):
         Complexity: O(n * d).
         """
         X = _check_for_transform(X, self._stats.n_features_, "MinMaxScaler")
-        lo, span = self._range()
+        lo, half_span = self._range()
         a, b = self.feature_range
-        out = (X - lo) / span * (b - a) + a
+        out = (X / 2 - lo / 2) / half_span * (b - a) + a
         return np.clip(out, a, b) if self.clip else out
 
     def inverse_transform(self, X):
         """Map scaled values back to the original units."""
         X = _check_for_transform(X, self._stats.n_features_, "MinMaxScaler")
-        lo, span = self._range()
+        lo, half_span = self._range()
         a, b = self.feature_range
-        return (X - a) / (b - a) * span + lo
+        return ((X - a) / (b - a) * half_span + lo / 2) * 2
 
 
 class SimpleImputer(TransformerMixin, _group.SimpleImputer):

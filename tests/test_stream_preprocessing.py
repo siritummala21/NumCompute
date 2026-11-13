@@ -1,3 +1,5 @@
+import warnings
+
 import numpy as np
 import pytest
 
@@ -117,3 +119,16 @@ def test_onehot_unknown_missing_and_inverse():
     strict = OneHotEncoder(handle_unknown="error").partial_fit(np.array([["x"]], dtype=object))
     with pytest.raises(ValueError):
         strict.transform(np.array([["z"]], dtype=object))
+
+
+def test_huge_values_are_scaled_correctly():
+    # found by probing like the 2.1 marker: the squares overflowed near 1e308
+    X = np.array([[-1e308], [0.0], [1e308]])
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        Z = StandardScaler().partial_fit(X[:1]).partial_fit(X[1:]).transform(X)
+        mm = MinMaxScaler().partial_fit(X)
+        M = mm.transform(X)
+    np.testing.assert_allclose(Z.ravel(), [-np.sqrt(1.5), 0.0, np.sqrt(1.5)], rtol=1e-12)
+    np.testing.assert_array_equal(M.ravel(), [0.0, 0.5, 1.0])
+    np.testing.assert_array_equal(mm.inverse_transform(M), X)

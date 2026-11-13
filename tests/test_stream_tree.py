@@ -1,3 +1,5 @@
+import warnings
+
 import numpy as np
 import pytest
 
@@ -155,3 +157,10 @@ def test_bad_data_is_rejected():
         tree.predict([[1.0]])                           # too few features
     with pytest.raises(TypeError):
         tree.partial_fit([[1.0, 2.0]], ["a"])          # label type changed
+
+
+def test_split_between_huge_values():
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")                 # hi - lo used to overflow here
+        tree = DecisionTreeClassifier().fit([[-1e308], [1e308]], [0, 1])
+    np.testing.assert_array_equal(tree.predict([[-1e308], [1e308]]), [0, 1])

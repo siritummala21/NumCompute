@@ -45,11 +45,39 @@ def _update(step, X, y, fitted_once, key):
 
 
 class Pipeline(_group.Pipeline):
-    """The group ``Pipeline`` plus ``partial_fit`` and ``reset``."""
+    """The group ``Pipeline`` plus ``partial_fit`` and ``reset``.
+
+    It also accepts intermediate steps that only have ``transform`` (the
+    group version needs ``fit`` as well), because the module notes above
+    promise that such steps work.
+    """
 
     def __init__(self, steps):
         super().__init__(steps)
         self._fitted_once = set()
+
+    def _validate(self):
+        if not self.steps:
+            raise ValueError("Pipeline requires at least one step.")
+        names = [n for n, _ in self.steps]
+        if len(set(names)) != len(names):
+            raise ValueError(f"Step names must be unique, got {names}.")
+        for name, step in self.steps[:-1]:
+            if not (_is_passthrough(step) or _has(step, "transform")):
+                raise TypeError(f"Intermediate step {name!r} ({type(step).__name__}) needs "
+                                "a transform() method.")
+        name, last = self.steps[-1]
+        if not (_is_passthrough(last) or _has(last, "fit") or _has(last, "partial_fit")):
+            raise TypeError(f"Final step {name!r} needs fit() or partial_fit().")
+
+    def _fit_transform_head(self, X, y):
+        """Used by the group ``fit``: transform-only steps are applied without fitting."""
+        Xt = X
+        for _, step in self.steps[:-1]:
+            if _is_passthrough(step):
+                continue
+            Xt = _group._fit_transform(step, Xt, y) if _has(step, "fit") else step.transform(Xt)
+        return Xt
 
     @property
     def final_estimator(self):

@@ -20,6 +20,18 @@ from numcompute import stats as _group_stats
 from ._validation import check_array, check_random_state, check_scalar
 
 
+def _power_of_two_scale(X):
+    """Per-feature power of two close to the largest absolute value (1 if there is none).
+
+    Dividing by a power of two only changes the exponent of a float, so no
+    precision is lost.
+    """
+    with np.errstate(divide="ignore"):
+        biggest = np.nanmax(np.where(np.isnan(X), 0.0, np.abs(X)), axis=0)
+        exponent = np.where(biggest > 0, np.floor(np.log2(np.where(biggest > 0, biggest, 1.0))), 0)
+    return np.ldexp(1.0, exponent.astype(int))
+
+
 class RunningStats:
     """Running count, mean, variance, min and max per feature.
 
@@ -29,7 +41,11 @@ class RunningStats:
     * a sliding ``window`` (statistics over the last ``window`` chunks only),
       done by keeping one group ``RunningStats`` per chunk and combining them
       with the group's ``merge()``;
-    * input checks, a missing-value count and a ``result()`` dictionary.
+    * input checks, a missing-value count and a ``result()`` dictionary;
+    * values are divided by a power of two (one per feature, chosen from the
+      first chunk) before the squares are taken. Dividing by a power of two
+      is exact, and it stops ``(x - mean)^2`` from overflowing for values
+      near 1e308, where the variance came out wrong before.
 
     Complexity: ``update`` O(chunk * d); memory O(d), or O(window * d).
     """
@@ -42,6 +58,7 @@ class RunningStats:
         """Forget everything."""
         self.n_features_ = None
         self.n_missing_ = None
+        self._scale = None
         self._total = _group_stats.RunningStats()
         self._chunks = deque(maxlen=self.window)
         return self
@@ -57,10 +74,13 @@ class RunningStats:
         elif X.shape[1] != self.n_features_:
             raise ValueError(f"Expected {self.n_features_} features, got {X.shape[1]}.")
         self.n_missing_ += np.isnan(X).sum(axis=0)
+        if self._scale is None:
+            self._scale = _power_of_two_scale(X)
+        Xs = X / self._scale
         if self.window is None:
-            self._total.update(X)
+            self._total.update(Xs)
         else:
-            self._chunks.append(_group_stats.RunningStats().update(X))
+            self._chunks.append(_group_stats.RunningStats().update(Xs))
         return self
 
     def _state(self):
@@ -81,25 +101,30 @@ class RunningStats:
     @property
     def min_(self):
         """Smallest value per feature (inf if a column is all NaN)."""
-        return self._state().min
+        return self._state().min * self._scale
 
     @property
     def max_(self):
         """Largest value per feature (-inf if a column is all NaN)."""
-        return self._state().max
+        return self._state().max * self._scale
 
     def mean(self):
         """Mean per feature, shape (n_features,); NaN for an all-NaN column."""
         state = self._state()
-        return np.where(state.count > 0, state.mean, np.nan)
+        return np.where(state.count > 0, state.mean * self._scale, np.nan)
 
     def var(self, ddof=0):
-        """Variance per feature; NaN where there are not enough values."""
-        return self._state().var(ddof)
+        """Variance per feature; NaN where there are not enough values.
+
+        For values near 1e308 the variance itself is larger than the biggest
+        float and comes out as inf, but ``std`` is still finite.
+        """
+        with np.errstate(over="ignore"):
+            return self._state().var(ddof) * self._scale ** 2
 
     def std(self, ddof=0):
-        """Standard deviation per feature."""
-        return np.sqrt(self.var(ddof))
+        """Standard deviation per feature (taken before scaling back, so it does not overflow)."""
+        return np.sqrt(self._state().var(ddof)) * self._scale
 
     def result(self):
         """Dictionary with count, mean, var, std, min, max and n_missing."""
@@ -233,13 +258,16 @@ class StreamingHistogram:
                 lo, hi = np.nan_to_num(lo), np.nan_to_num(hi)
                 same = hi <= lo                            # constant column: widen by 0.5
                 lo, hi = np.where(same, lo - 0.5, lo), np.where(same, hi + 0.5, hi)
-            self.edges_ = np.linspace(lo, hi, self.bins + 1).T     # (d, bins + 1)
+            # built from half values so hi - lo cannot overflow (exact for powers of two)
+            self.edges_ = (np.linspace(lo / 2, hi / 2, self.bins + 1) * 2).T   # (d, bins + 1)
             self._counts = np.zeros((X.shape[1], self.bins), dtype=np.int64)
         counts = np.zeros_like(self._counts)
         for j in range(X.shape[1]):
             lo, hi = self.edges_[j, 0], self.edges_[j, -1]
             col = np.clip(X[:, j], lo, hi)
-            counts[j] = _group_stats.histogram(col, bins=self.bins, range=(lo, hi))[0]
+            # count the halves: same bins, but no overflow for ranges near 1e308
+            counts[j] = _group_stats.histogram(col / 2, bins=self.bins,
+                                               range=(lo / 2, hi / 2))[0]
         if self.window is None:
             self._counts += counts
         else:

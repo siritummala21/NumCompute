@@ -1,3 +1,5 @@
+import warnings
+
 import numpy as np
 import pytest
 
@@ -137,3 +139,15 @@ def test_update_stats_collects_everything(rng):
     np.testing.assert_allclose(out["median"], np.median(X, axis=0))   # capacity 1000 > 300
     assert out["hist_counts"].sum() == X.size
     assert isinstance(state, StreamStats)
+
+
+def test_huge_values_do_not_overflow():
+    X = np.array([[-1e308], [0.0], [1e308]])
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        rs = RunningStats().update(X)
+        counts, edges = StreamingHistogram(bins=2).update(X).result()
+    assert rs.mean()[0] == 0.0
+    assert rs.std()[0] == pytest.approx(np.sqrt(2 / 3) * 1e308, rel=1e-12)
+    np.testing.assert_array_equal(edges, [[-1e308, 0.0, 1e308]])
+    np.testing.assert_array_equal(counts, [[1, 2]])

@@ -56,7 +56,10 @@ CRITERIA = {"gini": gini, "entropy": entropy}
 
 def _threshold(lo, hi):
     """Mid-point between two sorted values, guaranteed to satisfy lo <= t < hi."""
-    mid = lo + (hi - lo) / 2.0
+    with np.errstate(over="ignore"):
+        diff = hi - lo
+    # hi - lo overflows for values near +-1e308; halving first avoids that
+    mid = lo + diff / 2.0 if np.isfinite(diff) else lo / 2.0 + hi / 2.0
     return mid if lo <= mid < hi else lo        # rounding can land on hi
 
 
