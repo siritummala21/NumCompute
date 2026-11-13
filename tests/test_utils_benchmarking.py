@@ -48,7 +48,9 @@ def test_pairwise_distances_against_loop(rng, metric):
 def test_pairwise_self_distance_zero_and_errors():
     A = np.array([[1e8, 1e8], [1e8, 1e8 + 1]])
     D = pairwise_distances(A)
-    assert np.all(D >= 0) and np.all(np.isfinite(D))
+    # exact expected values, not just finiteness (Assignment 2.1 feedback)
+    np.testing.assert_array_equal(D, [[0.0, 1.0], [1.0, 0.0]])
+    assert pairwise_distances([[1e9]], [[1e9 + 1]])[0, 0] == 1.0
     with pytest.raises(ValueError):
         pairwise_distances(np.ones((2, 3)), np.ones((2, 2)))
 

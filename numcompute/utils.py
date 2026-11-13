@@ -75,9 +75,26 @@ def pairwise_distances(
         raise ValueError(f"A and B must have the same number of columns, got {A.shape[1]} and {B.shape[1]}.")
 
     if metric in ("euclidean", "sqeuclidean"):
-        sq = (A * A).sum(1)[:, None] + (B * B).sum(1)[None, :] - 2.0 * (A @ B.T)
-        np.maximum(sq, 0.0, out=sq)
-        return np.sqrt(sq) if metric == "euclidean" else sq
+        # Direct differences, not the Gram identity |a|^2 + |b|^2 - 2 a.b: that
+        # identity cancels catastrophically for nearby points with large
+        # coordinates (1e9 vs 1e9 + 1 gave 0 instead of 1). Differences are
+        # formed in halves (exact) and scaled by their largest component, so
+        # neither huge nor tiny coordinates overflow or underflow. Rows of A
+        # are processed in blocks to bound memory at ~32 MB.
+        # Time O(n*m*d); extra space O(block*m*d).
+        D = np.empty((A.shape[0], B.shape[0]))
+        block = max(1, (1 << 22) // max(1, B.shape[0] * A.shape[1]))
+        for start in range(0, A.shape[0], block):
+            half = A[start:start + block, None, :] * 0.5 - B[None, :, :] * 0.5
+            scale = np.abs(half).max(axis=-1, initial=0.0)
+            safe = np.where(scale > 0, scale, 1.0)
+            r = half / safe[..., None]
+            with np.errstate(over="ignore"):
+                D[start:start + block] = 2.0 * scale * np.sqrt(np.einsum("ijk,ijk->ij", r, r))
+        if metric == "euclidean":
+            return D
+        with np.errstate(over="ignore"):
+            return D * D
     if metric == "manhattan":
         return np.abs(A[:, None, :] - B[None, :, :]).sum(-1)
     if metric == "cosine":

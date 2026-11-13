@@ -5,6 +5,7 @@ expected answer:
 
 * StandardScaler must standardise a tiny but non-constant feature
   ([1e-16, 2e-16, 3e-16]) to unit variance.
+* Euclidean distance between 1e9 and 1e9 + 1 must be 1, not 0.
 
 Written with ``unittest`` so it runs under both pytest and
 ``python -m unittest``.
@@ -16,6 +17,7 @@ import warnings
 import numpy as np
 
 from numcompute.preprocessing import MinMaxScaler, StandardScaler
+from numcompute.utils import pairwise_distances
 
 
 class TestScalerTinyAndHugeValues(unittest.TestCase):
@@ -46,6 +48,32 @@ class TestScalerTinyAndHugeValues(unittest.TestCase):
         np.testing.assert_allclose(MinMaxScaler().fit(tiny).transform(tiny).ravel(), [0, 0.5, 1])
         huge = np.array([[-1e308], [0.0], [1e308]])
         np.testing.assert_allclose(MinMaxScaler().fit(huge).transform(huge).ravel(), [0, 0.5, 1])
+
+
+class TestDistancesWithLargeCoordinates(unittest.TestCase):
+
+    def test_feedback_probe_exact(self):
+        self.assertEqual(pairwise_distances([[1e9]], [[1e9 + 1]])[0, 0], 1.0)
+        self.assertEqual(pairwise_distances([[1e9, 5.0]], [[1e9 + 1, 5.0]],
+                                            metric="sqeuclidean")[0, 0], 1.0)
+
+    def test_known_distances_at_many_offsets(self):
+        for offset in (0.0, 1e6, 1e9, 1e12, -1e15):
+            with self.subTest(offset=offset):
+                A = np.array([[offset, offset], [offset + 3.0, offset + 4.0]])
+                np.testing.assert_array_equal(pairwise_distances(A), [[0, 5], [5, 0]])
+
+    def test_tiny_coordinates_do_not_underflow(self):
+        self.assertAlmostEqual(pairwise_distances([[0.0]], [[3e-200]])[0, 0] / 3e-200, 1.0,
+                               places=12)
+
+    def test_matches_direct_loop(self):
+        rng = np.random.default_rng(0)
+        A, B = rng.normal(size=(40, 5)), rng.normal(size=(25, 5))
+        ref = np.array([[np.sqrt(np.sum((a - b) ** 2)) for b in B] for a in A])
+        np.testing.assert_allclose(pairwise_distances(A, B), ref, rtol=1e-12)
+        np.testing.assert_allclose(pairwise_distances(A, B, metric="sqeuclidean"), ref ** 2,
+                                   rtol=1e-12)
 
 
 if __name__ == "__main__":
