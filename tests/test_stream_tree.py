@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 from _helpers import make_blobs
+from numcompute_stream import NotFittedError
 from numcompute_stream.tree import (DecisionTree, DecisionTreeClassifier, best_split_loop,
                                     best_split_vectorised, entropy, gini)
 
@@ -11,6 +12,7 @@ def test_gini_and_entropy_values():
     assert gini([10, 0]) == 0.0
     assert entropy([5, 5]) == pytest.approx(1.0)
     assert entropy([4, 0]) == 0.0
+    assert gini([0, 0]) == 0.0                           # empty node is not NaN
 
 
 @pytest.mark.parametrize("criterion", ["gini", "entropy"])
@@ -53,6 +55,8 @@ def test_buffer_retrains_only_when_full(rng):
     tree = DecisionTree(max_depth=4, buffer_size=100)
     tree.partial_fit(X[:60], y[:60])
     assert not tree.is_fitted and tree.buffer_count == 60
+    with pytest.raises(NotFittedError):
+        tree.predict(X[:5])
     tree.partial_fit(X[60:120], y[60:120])             # 120 >= 100: retrain
     assert tree.last_partial_fit_retrained_ and tree.buffer_count == 0
     assert tree.n_retrains_ == 1 and tree.retrain_history_[0]["n_samples"] == 120
@@ -96,6 +100,8 @@ def test_wider_chunk_pads_older_rows(rng):
     tree.partial_fit(rng.random((10, 2)), np.zeros(10, dtype=int))
     tree.partial_fit(rng.random((10, 3)), np.ones(10, dtype=int))
     assert tree.n_features_in_ == 3
+    with pytest.raises(ValueError):
+        tree.partial_fit(rng.random((5, 2)), np.zeros(5, dtype=int))
 
 
 def test_flush_keeps_only_last_rows(rng):

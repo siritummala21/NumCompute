@@ -40,7 +40,7 @@ def gini(counts):
     counts = np.asarray(counts, dtype=float)
     total = counts.sum(axis=-1, keepdims=True)
     p = counts / np.where(total > 0, total, 1.0)
-    return 1.0 - np.sum(p * p, axis=-1) * (total[..., 0] > 0)
+    return (1.0 - np.sum(p * p, axis=-1)) * (total[..., 0] > 0)
 
 
 def entropy(counts):
@@ -249,10 +249,10 @@ class DecisionTreeClassifier(BaseEstimator, ClassifierMixin):
         if X.shape[0] == 0:
             return self
         self._add_classes(y)
-        if self._buffer_X and X.shape[1] != self._buffer_X[0].shape[1]:
-            width = self._buffer_X[0].shape[1]
-            if X.shape[1] < width:
-                raise ValueError(f"Chunk has {X.shape[1]} features, earlier chunks had {width}.")
+        width = self._buffer_X[0].shape[1] if self._buffer_X else self.n_features_in_
+        if width is not None and X.shape[1] < width:
+            raise ValueError(f"Chunk has {X.shape[1]} features, earlier chunks had {width}.")
+        if self._buffer_X and X.shape[1] > width:
             # the one-hot encoder added a column: older rows get 0 there
             self._buffer_X = [np.pad(b, ((0, 0), (0, X.shape[1] - width)))
                               for b in self._buffer_X]
@@ -379,7 +379,8 @@ class DecisionTreeClassifier(BaseEstimator, ClassifierMixin):
 
     def predict_proba(self, X):
         """Class probabilities, shape (n_samples, n_classes)."""
-        counts = self._tree["counts"][self.apply(X)].astype(float)
+        leaves = self.apply(X)
+        counts = self._tree["counts"][leaves].astype(float)
         proba = counts / counts.sum(axis=1, keepdims=True)
         if self._tree["classes"].size == self.classes_.size:
             return proba
@@ -393,8 +394,8 @@ class DecisionTreeClassifier(BaseEstimator, ClassifierMixin):
 
         Complexity: O(n * depth).
         """
-        counts = self._tree["counts"][self.apply(X)]
-        return self._tree["classes"][np.argmax(counts, axis=1)]
+        leaves = self.apply(X)                 # checks the tree exists first
+        return self._tree["classes"][np.argmax(self._tree["counts"][leaves], axis=1)]
 
     def predict_loop(self, X):
         """One sample at a time in Python (benchmark baseline only)."""
