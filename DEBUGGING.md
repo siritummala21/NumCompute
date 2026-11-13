@@ -51,11 +51,29 @@ All 99 original group tests still pass after these changes.
 | 18 | One empty chunk stopped the whole stream | `partial_fit` rejected 0 rows | Empty chunks are ignored everywhere | `test_empty_chunk_is_skipped_and_max_chunks` |
 | 19 | My first imputer test expected the median of `[1, 1, 4]` to be 2 | Mistake in the test, not the code | Fixed the test data and worked the expected values out by hand | `test_imputer_strategies` |
 
+### Probing after the first full version
+
+Once everything worked I probed the streaming classes the same way the 2.1
+marker probed the group code: extreme values, outside components, and a
+`warnings`-as-errors run so silent overflows show up.
+
+| # | What went wrong | Cause | Fix | Test |
+|---|---|---|---|---|
+| 20 | The streaming `StandardScaler` turned `[-1e308, 0, 1e308]` into ±0.556 instead of ±1.225 (the group scaler was already right) | `(x - mean)^2` overflows to inf inside the running variance | `RunningStats` divides each feature by a power of two before squaring; that division is exact | `test_huge_values_are_scaled_correctly`, `test_huge_values_do_not_overflow` |
+| 21 | `MinMaxScaler` gave NaN for the same column | `hi - lo` overflowed | Work with half values: `hi/2 - lo/2` cannot overflow | `test_huge_values_are_scaled_correctly` |
+| 22 | Histogram edges were NaN for a range of ±1e308 (and the group `histogram` crashed with an index error on it) | `linspace` and the bin formula compute `hi - lo` | Build the edges and count on half values, which gives the same bins | `test_huge_values_do_not_overflow` |
+| 23 | Overflow warning when the tree split between -1e308 and 1e308 | The midpoint `lo + (hi - lo) / 2` | Use `lo/2 + hi/2` when `hi - lo` is not finite | `test_split_between_huge_values` |
+| 24 | A step with only `transform()` was rejected by `Pipeline`, although my docstring said it was allowed | The group `Pipeline` checks for both `fit` and `transform` | Own `_validate`; `fit` applies such steps without fitting them | `test_transform_only_step_is_allowed` |
+
+The benchmark tables now also start with the run time and the git commit of
+the code they measured, as the 2.1 feedback asked for.
+
 ## Edge cases I tested on purpose
 
 NaN features and all-NaN columns, NaN and inf labels, constant columns,
 empty chunks, 1-D input, Excel CSV files, ties between thresholds and
 features, a single class, new classes and new categories in the middle of
 the stream, wider and narrower chunks, a label type change, prediction before
-the first retrain, bad hyper-parameters (negative, bool, float for int), and
-outside components with `fit(X)` only.
+the first retrain, bad hyper-parameters (negative, bool, float for int),
+values near ±1e308 and 1e-16, and outside components with `fit(X)` only or
+`transform` only.

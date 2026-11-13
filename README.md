@@ -168,6 +168,7 @@ and a test checks both choose the same splits.
 |---|---|
 | NaN in features | statistics skip NaN; the tree scores splits on the non-missing rows and sends NaN rows to the larger child |
 | Tiny values such as 1e-16 | a column is constant only if its max equals its min, so tiny but varying columns are still scaled |
+| Huge values near ±1e308 | values are divided by a power of two before squaring, and ranges use `hi/2 - lo/2`, so nothing overflows |
 | Ties | equal values are never split apart; lowest feature, then lowest threshold wins |
 | Constant chunk or one class | scale is 1 and the transform gives 0; the tree is a single leaf |
 | Empty chunk | ignored |
@@ -181,7 +182,8 @@ python benchmark/stream_benchmark.py      # about 30 s
 ```
 
 Results go to `benchmark/stream_results/` (CSV and Markdown tables, plots and
-`summary.json` with the machine and library versions). Times are the best of
+`summary.json`). Every table starts with the run time, the git commit of the
+code it measured, the machine and the library versions. Times are the best of
 several runs after one warm-up, and the speed-up is loop time divided by
 vectorised time, so it depends on the machine.
 
@@ -207,17 +209,17 @@ drifting streams, chunks of 100, drift at chunk 30:
 ## Running the tests
 
 ```bash
-python -m pytest            # 218 tests
+python -m pytest            # 222 tests
 ```
 
 | Test file | Tests | What it checks |
 |---|---|---|
 | test_stream_io.py | 11 | CSV parsing, missing values, lazy chunks, bad files |
-| test_stream_stats.py | 14 | running moments, window, quantiles, histograms |
-| test_stream_preprocessing.py | 16 | scalers, imputer, one-hot encoder |
+| test_stream_stats.py | 15 | running moments, window, quantiles, histograms, huge values |
+| test_stream_preprocessing.py | 17 | scalers (tiny and huge values), imputer, one-hot encoder |
 | test_stream_metrics.py | 13 | streamed metrics against batch values, AUC, rolling window |
-| test_stream_tree.py | 26 | impurity, split search vs loop, buffering, edge cases, parameter checks |
-| test_stream_pipeline.py | 7 | pipelines, mixed columns, new categories, fit-only steps |
+| test_stream_tree.py | 27 | impurity, split search vs loop, buffering, edge cases, parameter checks |
+| test_stream_pipeline.py | 8 | pipelines, mixed columns, new categories, fit-only and transform-only steps |
 | test_stream_trainer.py | 10 | test-then-train log, DDM, plots |
 | test_stream_matches_numcompute.py | 8 | subclassing and equality with the numcompute functions |
 | test_numcompute_feedback_fixes.py | 14 | the 2.1 feedback cases |
@@ -232,5 +234,7 @@ python -m pytest            # 218 tests
 | `grad` accepted a NaN step | `h`, `alpha0`, `tol` and `max_iter` are checked | `TestOptimiserStepValidation` |
 | `fit(X)`-only transformers broke pipelines | `y` is passed only when `fit` accepts it | `TestFitOnlyTransformerCompatibility` |
 | Tests did not check exact answers for edge cases | tests now assert the exact expected values | `test_numcompute_feedback_fixes.py`, `test_stream_*.py` |
+| Benchmark tables were not tied to one run, and speed-up was not labelled | every table starts with its run time and commit; speed-up is the ratio of best times | `benchmark/stream_results/*.md` |
+| Demo video was over five minutes | the 2.2 video is under five minutes | link in the report |
 
 `DEBUGGING.md` has the full list of bugs and fixes.
