@@ -9,9 +9,12 @@ metrics        accuracy, precision, recall, F1, confusion matrix, AUC
 tree           DecisionTreeClassifier with buffered partial_fit
 pipeline       Pipeline and ColumnTransformer with partial_fit
 stream         StreamTrainer (test-then-train evaluation and logging)
+drift          DDM drift detector
+visualise      plots
 """
 
 from ._validation import NotFittedError
+from .drift import DDM
 from .io import Dataset, chunk_stream, iter_csv_chunks, read_csv, write_csv
 from .metrics import (Accuracy, F1Score, Precision, Recall, RollingMetric, StreamingAUC,
                       StreamingConfusionMatrix)
@@ -21,36 +24,13 @@ from .stats import RunningStats, StreamingHistogram, StreamingQuantile, StreamSt
 from .stream import StreamTrainer
 from .tree import DecisionTree, DecisionTreeClassifier
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"
 
 __all__ = [
-    "NotFittedError",
-    "Dataset",
-    "read_csv",
-    "iter_csv_chunks",
-    "chunk_stream",
-    "write_csv",
-    "RunningStats",
-    "StreamingQuantile",
-    "StreamingHistogram",
-    "StreamStats",
-    "update_stats",
-    "StandardScaler",
-    "MinMaxScaler",
-    "SimpleImputer",
-    "Imputer",
-    "OneHotEncoder",
-    "Accuracy",
-    "Precision",
-    "Recall",
-    "F1Score",
-    "StreamingConfusionMatrix",
-    "StreamingAUC",
-    "RollingMetric",
-    "DecisionTreeClassifier",
-    "DecisionTree",
-    "Pipeline",
-    "ColumnTransformer",
-    "make_pipeline",
-    "StreamTrainer",
+    "NotFittedError", "Dataset", "read_csv", "iter_csv_chunks", "chunk_stream", "write_csv",
+    "RunningStats", "StreamingQuantile", "StreamingHistogram", "StreamStats", "update_stats",
+    "StandardScaler", "MinMaxScaler", "SimpleImputer", "Imputer", "OneHotEncoder",
+    "Accuracy", "Precision", "Recall", "F1Score", "StreamingConfusionMatrix",
+    "StreamingAUC", "RollingMetric", "DecisionTreeClassifier", "DecisionTree",
+    "Pipeline", "ColumnTransformer", "make_pipeline", "StreamTrainer", "DDM",
 ]

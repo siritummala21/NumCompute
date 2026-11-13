@@ -7,7 +7,14 @@ train it. So every logged accuracy is an out-of-sample number.
 Logged per chunk: chunk, n_samples, chunk_accuracy, cumulative_accuracy,
 rolling_accuracy, cumulative_f1, auc (binary only), chunk_error, retrained,
 n_retrains, buffer_count, fit_seconds, predict_seconds, memory_bytes,
-samples_seen.
+samples_seen, and drift when a drift detector is used.
+
+Drift-triggered retraining
+--------------------------
+With ``drift_detector=DDM()`` the detector sees each chunk's errors. When it
+signals drift, the tree is retrained at once with ``flush`` on the rows seen
+since the detector's warning started, instead of waiting for the buffer to
+fill. Older rows in the buffer are from the old concept and are dropped.
 """
 
 import csv
@@ -40,6 +47,9 @@ class StreamTrainer:
         Label for logs and plots.
     log_every : int
         Write a log line every ``log_every`` chunks (0 = never).
+    drift_detector : DDM or None
+    drift_min_samples : int
+        Smallest number of buffered rows for a drift retrain.
 
     Example
     -------
@@ -49,15 +59,21 @@ class StreamTrainer:
     >>> trainer.summary()["final_cumulative_accuracy"]     # doctest: +SKIP
     """
 
-    def __init__(self, model, rolling_window=500, name=None, log_every=0):
+    def __init__(self, model, rolling_window=500, name=None, log_every=0,
+                 drift_detector=None, drift_min_samples=100):
         if not (callable(getattr(model, "partial_fit", None))
                 and callable(getattr(model, "predict", None))):
             raise TypeError("model must have partial_fit() and predict().")
+        if drift_detector is not None and not callable(getattr(_final(model), "flush", None)):
+            raise TypeError("drift_detector needs a model with flush() (the tree has it).")
         self.model = model
         self.rolling_window = check_scalar(rolling_window, "rolling_window", kind="int",
                                            min_val=1)
         self.name = name or type(_final(model)).__name__
         self.log_every = check_scalar(log_every, "log_every", kind="int", min_val=0)
+        self.drift_detector = drift_detector
+        self.drift_min_samples = check_scalar(drift_min_samples, "drift_min_samples",
+                                              kind="int", min_val=1)
         self.reset_metrics()
 
     def reset_metrics(self):
@@ -68,7 +84,9 @@ class StreamTrainer:
         self.confusion = StreamingConfusionMatrix()
         self.rolling = RollingMetric(Accuracy(), window=self.rolling_window)
         self.auc = StreamingAUC()
+        self.n_drift_retrains_ = 0
         self._samples_seen = 0
+        self._since_warning = 0
         self.last_predictions = None
         self.last_truth = None
         return self
@@ -113,17 +131,37 @@ class StreamTrainer:
         if y.shape[0] == 0:
             return None
         record = {"chunk": len(self.history), "n_samples": int(y.shape[0])}
-        scores, _ = self._score(X, y)
+        scores, y_pred = self._score(X, y)
         record.update(scores)
+
+        drift = False
+        if self.drift_detector is not None and y_pred is not None:
+            self.drift_detector.update(y, y_pred)
+            drift = self.drift_detector.drift_detected
+            # count the rows since the warning started: they show the new concept
+            if self.drift_detector.state in ("warning", "drift"):
+                self._since_warning += y.shape[0]
+            else:
+                self._since_warning = 0
 
         tree = _final(self.model)
         start = time.perf_counter()
         self.model.partial_fit(X, y)
         retrained = bool(getattr(tree, "last_partial_fit_retrained_", False))
+        if drift and not retrained:
+            before = tree.n_retrains_
+            tree.flush(min_samples=self.drift_min_samples, last_n=self._since_warning)
+            if tree.n_retrains_ > before:
+                retrained = True
+                self.n_drift_retrains_ += 1
+        if drift:
+            self._since_warning = 0
         record["fit_seconds"] = time.perf_counter() - start
         record["retrained"] = retrained
         record["n_retrains"] = int(getattr(tree, "n_retrains_", 0))
         record["buffer_count"] = int(getattr(tree, "buffer_count", 0))
+        if self.drift_detector is not None:
+            record["drift"] = bool(drift)
 
         self._samples_seen += y.shape[0]
         record["samples_seen"] = self._samples_seen
@@ -163,6 +201,7 @@ class StreamTrainer:
                 "final_rolling_accuracy": self.rolling.result(),
                 "auc": self.auc.result(),
                 "n_retrains": int(getattr(tree, "n_retrains_", 0)),
+                "n_drift_retrains": self.n_drift_retrains_,
                 "total_fit_seconds": float(np.sum(h.get("fit_seconds", 0.0))),
                 "total_predict_seconds": float(np.sum(h.get("predict_seconds", 0.0))),
                 "peak_memory_bytes": int(np.max(h.get("memory_bytes", [0])))}

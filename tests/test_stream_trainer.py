@@ -7,7 +7,7 @@ import pytest
 matplotlib.use("Agg")
 
 from _helpers import make_blobs
-from numcompute_stream import DecisionTreeClassifier, Pipeline, StandardScaler, StreamTrainer
+from numcompute_stream import DDM, DecisionTreeClassifier, Pipeline, StandardScaler, StreamTrainer
 from numcompute_stream import visualise as vis
 from numcompute_stream.io import chunk_stream
 
@@ -67,6 +67,35 @@ def test_log_lines_are_written(rng, caplog):
     with caplog.at_level(logging.INFO, logger="numcompute_stream"):
         trainer.run(chunk_stream(X, y, chunk_size=100))
     assert sum("[demo] chunk" in m for m in caplog.messages) == 2
+
+
+def test_ddm_states():
+    ddm = DDM(min_samples=50)
+    assert ddm.update_counts(5, 100).state == "stable"
+    assert ddm.update_counts(60, 100).state == "drift"
+    assert ddm.n_ == 0 and ddm.n_detections_ == 1      # reset after a drift
+    with pytest.raises(ValueError):
+        DDM(warning_level=3, drift_level=2)
+    with pytest.raises(ValueError):
+        ddm.update_counts(5, 4)
+
+
+def test_ddm_first_error_is_not_drift():
+    # without smoothing, a perfect model has s_min = 0 and one mistake looks like drift
+    ddm = DDM(min_samples=10)
+    ddm.update_counts(0, 100)
+    assert ddm.update_counts(1, 10).state != "drift"
+
+
+def test_drift_triggers_an_early_retrain(rng):
+    X, y = make_blobs(2000, rng, n_classes=2, spread=0.5)
+    y[1000:] = 1 - y[1000:]                            # the concept flips half way
+    tree = DecisionTreeClassifier(max_depth=4, buffer_size=1500)
+    trainer = StreamTrainer(tree, drift_detector=DDM(min_samples=100), drift_min_samples=50)
+    tree.fit(X[:500], y[:500])
+    trainer.run(chunk_stream(X[500:], y[500:], chunk_size=100))
+    assert trainer.n_drift_retrains_ >= 1
+    assert trainer.summary()["final_rolling_accuracy"] > 0.8
 
 
 def test_trainer_argument_checks():
