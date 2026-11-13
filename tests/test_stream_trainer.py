@@ -1,10 +1,14 @@
 import logging
 
+import matplotlib
 import numpy as np
 import pytest
 
+matplotlib.use("Agg")
+
 from _helpers import make_blobs
 from numcompute_stream import DecisionTreeClassifier, Pipeline, StandardScaler, StreamTrainer
+from numcompute_stream import visualise as vis
 from numcompute_stream.io import chunk_stream
 
 
@@ -72,3 +76,29 @@ def test_trainer_argument_checks():
         StreamTrainer(StandardScaler())                # no predict
     with pytest.raises(ValueError):
         make_trainer().to_csv("unused.csv")            # empty history
+
+
+def test_plots_return_figures(rng, tmp_path):
+    X, y = make_blobs(800, rng)
+    trainer = make_trainer()
+    trainer.run(chunk_stream(X, y, chunk_size=100))
+    h = trainer.history_arrays()
+    retrains = np.flatnonzero(h["retrained"])
+    figures = [
+        vis.plot_metric_over_time(h["rolling_accuracy"], retrain_points=retrains, smooth=3,
+                                  save_path=tmp_path / "m.png", show=False),
+        vis.compare_models(h["chunk_accuracy"], h["cumulative_accuracy"], show=False),
+        vis.compare_models({"a": h["chunk_accuracy"], "b": h["rolling_accuracy"]}, show=False),
+        vis.plot_predictions_vs_ground_truth(trainer.last_truth, trainer.last_predictions,
+                                             show=False),
+        vis.plot_confusion_matrix(trainer.confusion.result(), trainer.confusion.labels_,
+                                  normalise=True, show=False),
+        vis.plot_feature_importances(trainer.model["tree"].feature_importances_, show=False),
+        vis.plot_stream_dashboard(h, show=False),
+    ]
+    assert all(isinstance(f, matplotlib.figure.Figure) for f in figures)
+    assert (tmp_path / "m.png").stat().st_size > 0
+    with pytest.raises(ValueError):
+        vis.plot_metric_over_time([], show=False)
+    with pytest.raises(ValueError):
+        vis.plot_predictions_vs_ground_truth([0, 1], [0], show=False)
