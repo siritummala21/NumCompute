@@ -8,6 +8,7 @@ preprocessing  StandardScaler, MinMaxScaler, SimpleImputer, OneHotEncoder
 metrics        accuracy, precision, recall, F1, confusion matrix, AUC
 tree           DecisionTreeClassifier with buffered partial_fit
 pipeline       Pipeline and ColumnTransformer with partial_fit
+stream         StreamTrainer (test-then-train evaluation and logging)
 """
 
 from ._validation import NotFittedError
@@ -17,6 +18,7 @@ from .metrics import (Accuracy, F1Score, Precision, Recall, RollingMetric, Strea
 from .pipeline import ColumnTransformer, Pipeline, make_pipeline
 from .preprocessing import Imputer, MinMaxScaler, OneHotEncoder, SimpleImputer, StandardScaler
 from .stats import RunningStats, StreamingHistogram, StreamingQuantile, StreamStats, update_stats
+from .stream import StreamTrainer
 from .tree import DecisionTree, DecisionTreeClassifier
 
 __version__ = "0.1.0"
@@ -50,4 +52,5 @@ __all__ = [
     "Pipeline",
     "ColumnTransformer",
     "make_pipeline",
+    "StreamTrainer",
 ]
