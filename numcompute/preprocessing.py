@@ -43,16 +43,27 @@ class StandardScaler(TransformerMixin, BaseEstimator, _FittedMixin):
         X = check_array(X)
         self.n_features_in_ = X.shape[1]
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore", RuntimeWarning) 
-            mean = np.nanmean(X, axis=0)
-            std = np.nanstd(X, axis=0, ddof=self.ddof)
+            warnings.simplefilter("ignore", RuntimeWarning)
+            # Work in units of a per-column power of two (exact) so that tiny
+            # (1e-170) and huge (1e308) values neither underflow nor overflow.
+            absmax = np.nanmax(np.abs(X), axis=0)
+            exp = np.clip(np.frexp(np.where(np.isfinite(absmax), absmax, 0.0))[1], -1021, 1023)
+            unit = np.ldexp(1.0, exp)
+            Xs = X / unit
+            mean = np.nanmean(Xs, axis=0) * unit
+            std = np.nanstd(Xs, axis=0, ddof=self.ddof) * unit
+            constant = np.nanmax(X, axis=0) == np.nanmin(X, axis=0)
         self.mean_ = np.where(np.isnan(mean), 0.0, mean) if self.with_mean else np.zeros(X.shape[1])
         if self.with_std:
-            std = np.where(np.isnan(std) | (std < np.finfo(float).eps * 10), 1.0, std)
+            # A column is constant only if max == min (exact). The old absolute
+            # threshold std < 10*eps wrongly treated [1e-16, 2e-16, 3e-16] as
+            # constant (Assignment 2.1 feedback).
+            std = np.where(np.isnan(std) | constant | (std == 0), 1.0, std)
             self.scale_ = std
         else:
             self.scale_ = np.ones(X.shape[1])
-        self.var_ = self.scale_ ** 2
+        with np.errstate(over="ignore"):
+            self.var_ = self.scale_ ** 2      # inf if std > ~1.3e154 (not representable)
         return self
 
     def transform(self, X) -> np.ndarray:
@@ -90,10 +101,13 @@ class MinMaxScaler(TransformerMixin, BaseEstimator, _FittedMixin):
             dmax = np.nanmax(X, axis=0)
         dmin = np.where(np.isnan(dmin), 0.0, dmin)
         dmax = np.where(np.isnan(dmax), 0.0, dmax)
-        rng = dmax - dmin
-        safe = np.where(rng == 0, 1.0, rng)
+        with np.errstate(over="ignore"):
+            rng = dmax - dmin
+        # halves are exact and avoid overflow when dmax - dmin exceeds the float range
+        half_rng = dmax * 0.5 - dmin * 0.5
+        safe = np.where(dmax == dmin, 1.0, half_rng)
         self.data_min_, self.data_max_, self.data_range_ = dmin, dmax, rng
-        self.scale_ = (hi - lo) / safe
+        self.scale_ = ((hi - lo) * 0.5) / safe
         self.min_ = lo - dmin * self.scale_
         return self
 
