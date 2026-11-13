@@ -209,7 +209,7 @@ drifting streams, chunks of 100, drift at chunk 30:
 ## Running the tests
 
 ```bash
-python -m pytest            # 222 tests
+python -m pytest            # 253 tests
 ```
 
 | Test file | Tests | What it checks |
@@ -222,6 +222,7 @@ python -m pytest            # 222 tests
 | test_stream_pipeline.py | 8 | pipelines, mixed columns, new categories, fit-only and transform-only steps |
 | test_stream_trainer.py | 10 | test-then-train log, DDM, plots |
 | test_stream_matches_numcompute.py | 8 | subclassing and equality with the numcompute functions |
+| test_stream_errors_and_options.py | 31 | every error message and the less common options |
 | test_numcompute_feedback_fixes.py | 14 | the 2.1 feedback cases |
 | group `test_*.py` | 99 | NumCompute (2.1) |
 

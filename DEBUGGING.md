@@ -65,6 +65,16 @@ marker probed the group code: extreme values, outside components, and a
 | 23 | Overflow warning when the tree split between -1e308 and 1e308 | The midpoint `lo + (hi - lo) / 2` | Use `lo/2 + hi/2` when `hi - lo` is not finite | `test_split_between_huge_values` |
 | 24 | A step with only `transform()` was rejected by `Pipeline`, although my docstring said it was allowed | The group `Pipeline` checks for both `fit` and `transform` | Own `_validate`; `fit` applies such steps without fitting them | `test_transform_only_step_is_allowed` |
 
+Then I listed the lines that no test ran (error messages, rarely used
+options, `ColumnTransformer.fit` and passthrough columns) and wrote
+`test_stream_errors_and_options.py` for them. Now only six lines in the
+package are never run by a test. This found two more bugs:
+
+| # | What went wrong | Cause | Fix | Test |
+|---|---|---|---|---|
+| 25 | `tree.set_params(max_depth=-5)` was accepted | The group `set_params` only sets the attribute and skips the checks in `__init__` | `set_params` builds a new object with the merged values first, so a bad value raises and nothing changes | `test_set_params_is_checked_and_all_or_nothing` |
+| 26 | `StreamingAUC` with a score matrix and no `classes` crashed with `TypeError: 'NoneType' object is not iterable` | `classes` was used without a check | Clear `ValueError` asking for `classes=[...]` | `test_auc_and_rolling_errors` |
+
 The benchmark tables now also start with the run time and the git commit of
 the code they measured, as the 2.1 feedback asked for.
 
