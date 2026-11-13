@@ -4,24 +4,26 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "numcompute"
-version = "1.0.0"
-description = "A modular, NumPy-only machine-learning toolkit: I/O, preprocessing, sorting, ranking, statistics, metrics, finite-difference optimisation and pipelines."
+version = "1.1.0"
+description = "A modular, NumPy-only machine-learning toolkit (numcompute) and its streaming decision-tree extension (numcompute_stream)."
 readme = "README.md"
 requires-python = ">=3.9"
-dependencies = ["numpy>=1.23"]
-keywords = ["numpy", "machine-learning", "preprocessing", "statistics", "education"]
+dependencies = ["numpy>=1.23", "matplotlib>=3.5"]
+keywords = ["numpy", "machine-learning", "streaming", "decision-tree", "education"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Intended Audience :: Education",
-    "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7", "jupyter", "matplotlib"]
+dev = ["pytest>=7", "jupyter", "ipykernel"]
 
 [tool.setuptools]
-packages = ["numcompute"]
+packages = ["numcompute", "numcompute_stream"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.coverage.run]
+source = ["numcompute", "numcompute_stream"]

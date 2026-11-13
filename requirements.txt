@@ -1,5 +1,7 @@
 numpy>=1.23
-# development / demo
+matplotlib>=3.5
+# testing
 pytest>=7
+# demo notebooks (VS Code / Jupyter)
 jupyter
-matplotlib
+ipykernel
