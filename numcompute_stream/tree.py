@@ -1,4 +1,4 @@
-"""Decision tree classifier (CART).
+"""Decision tree classifier (CART) with buffered retraining for streams.
 
 How a split is found (vectorised)
 ---------------------------------
@@ -9,6 +9,12 @@ child is ``total - left``. The Gini or entropy of every possible split is then
 one array expression, and ``argmax`` picks the best one. This is
 O(n log n) per feature instead of O(n^2) for trying every threshold in a loop
 (``best_split_loop``, kept for the benchmark).
+
+Streaming
+---------
+``partial_fit`` adds the chunk to a buffer. Once the buffer holds at least
+``buffer_size`` samples, the tree is retrained on the buffer and the buffer is
+cleared. Between retrains ``predict`` uses the most recently trained tree.
 
 Edge cases
 ----------
@@ -135,7 +141,7 @@ SPLITTERS = {"vectorised": best_split_vectorised, "loop": best_split_loop}
 
 
 class DecisionTreeClassifier(BaseEstimator, ClassifierMixin):
-    """Decision tree classifier.
+    """Decision tree classifier with buffered streaming retraining.
 
     Parameters
     ----------
@@ -148,6 +154,8 @@ class DecisionTreeClassifier(BaseEstimator, ClassifierMixin):
     max_features : int, float, 'sqrt', 'log2' or None
         Number of features tried at each node (random subset), None = all.
     criterion : {'gini', 'entropy'}
+    buffer_size : int
+        Samples collected by ``partial_fit`` before the tree is retrained.
     splitter : {'vectorised', 'loop'}
         'loop' is the slow reference version used in the benchmark.
     random_state : int or None
@@ -155,18 +163,21 @@ class DecisionTreeClassifier(BaseEstimator, ClassifierMixin):
 
     Example
     -------
-    >>> tree = DecisionTreeClassifier(max_depth=5).fit(X, y)   # doctest: +SKIP
-    >>> tree.predict(X_new)                                  # doctest: +SKIP
+    >>> tree = DecisionTreeClassifier(max_depth=5, buffer_size=500)
+    >>> for X_chunk, y_chunk in stream:            # doctest: +SKIP
+    ...     tree.partial_fit(X_chunk, y_chunk)
     """
 
     def __init__(self, max_depth=None, min_samples_split=2, min_samples_leaf=1,
-                 max_features=None, criterion="gini", splitter="vectorised", random_state=None):
+                 max_features=None, criterion="gini", buffer_size=500,
+                 splitter="vectorised", random_state=None):
         self.max_depth = check_scalar(max_depth, "max_depth", kind="int", min_val=0,
                                       allow_none=True)
         self.min_samples_split = check_scalar(min_samples_split, "min_samples_split",
                                               kind="int", min_val=2)
         self.min_samples_leaf = check_scalar(min_samples_leaf, "min_samples_leaf",
                                              kind="int", min_val=1)
+        self.buffer_size = check_scalar(buffer_size, "buffer_size", kind="int", min_val=1)
         if criterion not in CRITERIA:
             raise ValueError(f"criterion must be 'gini' or 'entropy', got {criterion!r}.")
         if splitter not in SPLITTERS:
@@ -186,13 +197,16 @@ class DecisionTreeClassifier(BaseEstimator, ClassifierMixin):
 
     # ---------------------------------------------------------------- state
     def reset(self):
-        """Drop the tree."""
+        """Drop the tree, the buffer and the retrain history."""
         self._rng = check_random_state(self.random_state)
         self.classes_ = None
         self.n_features_in_ = None
         self._tree = None
+        self._buffer_X, self._buffer_y = [], []
+        self.buffer_count = 0
         self.n_retrains_ = 0
         self.retrain_history_ = []
+        self.last_partial_fit_retrained_ = False
         return self
 
     def _add_classes(self, y):
@@ -209,7 +223,9 @@ class DecisionTreeClassifier(BaseEstimator, ClassifierMixin):
 
     def _check_fitted(self):
         if self._tree is None:
-            raise NotFittedError("No tree trained yet: call fit() first.")
+            raise NotFittedError(f"No tree trained yet: call fit(), or partial_fit() until "
+                                 f"{self.buffer_size} samples are buffered "
+                                 f"(now {self.buffer_count}).")
 
     # ------------------------------------------------------------- training
     def fit(self, X, y):
@@ -222,6 +238,51 @@ class DecisionTreeClassifier(BaseEstimator, ClassifierMixin):
         self._add_classes(y)
         self._build(X, y)
         return self
+
+    def partial_fit(self, X_chunk, y_chunk):
+        """Add a chunk to the buffer and retrain once it holds ``buffer_size`` samples.
+
+        Complexity: O(chunk) to buffer; a retrain costs the same as fit on the buffer.
+        """
+        X, y = check_X_y(X_chunk, y_chunk, allow_empty=True)
+        self.last_partial_fit_retrained_ = False
+        if X.shape[0] == 0:
+            return self
+        self._add_classes(y)
+        if self._buffer_X and X.shape[1] != self._buffer_X[0].shape[1]:
+            width = self._buffer_X[0].shape[1]
+            if X.shape[1] < width:
+                raise ValueError(f"Chunk has {X.shape[1]} features, earlier chunks had {width}.")
+            # the one-hot encoder added a column: older rows get 0 there
+            self._buffer_X = [np.pad(b, ((0, 0), (0, X.shape[1] - width)))
+                              for b in self._buffer_X]
+        self._buffer_X.append(X)
+        self._buffer_y.append(y)
+        self.buffer_count += X.shape[0]
+        if self.buffer_count >= self.buffer_size:
+            self._retrain()
+        return self
+
+    def flush(self, min_samples=1, last_n=None):
+        """Retrain now on the buffered samples (e.g. after drift is detected).
+
+        ``last_n`` keeps only the most recent samples, because after a drift
+        the older rows describe the old concept.
+        """
+        if self.buffer_count < max(min_samples, 1):
+            return self
+        if last_n is not None and last_n < self.buffer_count:
+            keep = max(last_n, min_samples)
+            self._buffer_X = [np.concatenate(self._buffer_X)[-keep:]]
+            self._buffer_y = [np.concatenate(self._buffer_y)[-keep:]]
+        self._retrain()
+        return self
+
+    def _retrain(self):
+        self._build(np.concatenate(self._buffer_X), np.concatenate(self._buffer_y))
+        self._buffer_X, self._buffer_y = [], []
+        self.buffer_count = 0
+        self.last_partial_fit_retrained_ = True
 
     def _n_try(self, d):
         """How many features to try at each node."""
@@ -360,8 +421,10 @@ class DecisionTreeClassifier(BaseEstimator, ClassifierMixin):
         return int((self._tree["left"] < 0).sum())
 
     def memory_bytes(self):
-        """Bytes used by the tree arrays."""
-        return int(sum(a.nbytes for a in self._tree.values())) if self._tree else 0
+        """Bytes used by the tree arrays and the buffer."""
+        tree = sum(a.nbytes for a in self._tree.values()) if self._tree else 0
+        buffer = sum(b.nbytes for b in self._buffer_X + self._buffer_y)
+        return int(tree + buffer)
 
     def export_text(self, feature_names=None, decimals=3):
         """The tree as indented text."""
@@ -387,7 +450,7 @@ class DecisionTreeClassifier(BaseEstimator, ClassifierMixin):
         return "\n".join(lines)
 
 
-#: Name used in the brief.
+#: Name used in the brief: DecisionTree(max_depth=5, buffer_size=500).
 DecisionTree = DecisionTreeClassifier
 
 __all__ = ["DecisionTreeClassifier", "DecisionTree", "gini", "entropy",
