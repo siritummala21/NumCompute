@@ -10,9 +10,21 @@ __all__ = ["grad", "jacobian", "check_grad", "line_search", "gradient_descent"]
 _METHODS = ("central", "forward", "backward")
 
 
+def _check_positive_finite(value, name: str) -> float:
+    """Return ``value`` as float if it is a finite number > 0, else raise.
+
+    Comparisons with NaN are always False, so ``h <= 0`` alone let ``h=nan``
+    through and produced NaN gradients (Assignment 2.1 feedback).
+    """
+    if isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, float, np.number)):
+        raise TypeError(f"{name} must be a real number, got {type(value).__name__} {value!r}.")
+    if not np.isfinite(value) or value <= 0:
+        raise ValueError(f"{name} must be a finite number > 0, got {value!r}.")
+    return float(value)
+
+
 def _steps(x: np.ndarray, h: float, relative: bool) -> np.ndarray:
-    if h <= 0:
-        raise ValueError(f"h must be positive, got {h}.")
+    h = _check_positive_finite(h, "h")
     return h * np.maximum(1.0, np.abs(x)) if relative else np.full(x.shape, float(h))
 
 
@@ -105,6 +117,9 @@ def line_search(
     
     if not 0 < rho < 1 or not 0 < c < 1:
         raise ValueError("rho and c must lie in (0, 1).")
+    alpha0 = _check_positive_finite(alpha0, "alpha0")
+    if isinstance(max_iter, bool) or not isinstance(max_iter, (int, np.integer)) or max_iter < 1:
+        raise ValueError(f"max_iter must be an int >= 1, got {max_iter!r}.")
     x = np.asarray(x, dtype=float)
     d = np.asarray(direction, dtype=float)
     if d.shape != x.shape:
@@ -127,6 +142,11 @@ def gradient_descent(
     max_iter: int = 1000, alpha0: float = 1.0,
 ) -> Dict[str, object]:
     
+    if not np.isfinite(tol) or tol < 0:
+        raise ValueError(f"tol must be a finite number >= 0, got {tol!r}.")
+    if isinstance(max_iter, bool) or not isinstance(max_iter, (int, np.integer)) or max_iter < 0:
+        raise ValueError(f"max_iter must be an int >= 0, got {max_iter!r}.")
+    _check_positive_finite(alpha0, "alpha0")
     x = np.asarray(x0, dtype=float).copy()
     history = [float(f(x))]
     converged = False
