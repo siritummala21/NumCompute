@@ -7,12 +7,14 @@ stats          running mean/variance, quantiles and histograms (update_stats)
 preprocessing  StandardScaler, MinMaxScaler, SimpleImputer, OneHotEncoder
 metrics        accuracy, precision, recall, F1, confusion matrix, AUC
 tree           DecisionTreeClassifier with buffered partial_fit
+pipeline       Pipeline and ColumnTransformer with partial_fit
 """
 
 from ._validation import NotFittedError
 from .io import Dataset, chunk_stream, iter_csv_chunks, read_csv, write_csv
 from .metrics import (Accuracy, F1Score, Precision, Recall, RollingMetric, StreamingAUC,
                       StreamingConfusionMatrix)
+from .pipeline import ColumnTransformer, Pipeline, make_pipeline
 from .preprocessing import Imputer, MinMaxScaler, OneHotEncoder, SimpleImputer, StandardScaler
 from .stats import RunningStats, StreamingHistogram, StreamingQuantile, StreamStats, update_stats
 from .tree import DecisionTree, DecisionTreeClassifier
@@ -45,4 +47,7 @@ __all__ = [
     "RollingMetric",
     "DecisionTreeClassifier",
     "DecisionTree",
+    "Pipeline",
+    "ColumnTransformer",
+    "make_pipeline",
 ]
