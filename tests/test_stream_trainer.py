@@ -131,3 +131,18 @@ def test_plots_return_figures(rng, tmp_path):
         vis.plot_metric_over_time([], show=False)
     with pytest.raises(ValueError):
         vis.plot_predictions_vs_ground_truth([0, 1], [0], show=False)
+
+
+def test_score_chunk_then_fit_chunk_by_hand(rng):
+    # the spec asks for fit_chunk and score_chunk; process_chunk is the two in a row
+    X, y = make_blobs(600, rng)
+    by_hand, auto = make_trainer(), make_trainer()
+    for X_chunk, y_chunk in chunk_stream(X, y, chunk_size=100):
+        scores = by_hand.score_chunk(X_chunk, y_chunk)          # test first
+        fit = by_hand.fit_chunk(X_chunk, y_chunk)               # then train
+        record = auto.process_chunk(X_chunk, y_chunk)
+        assert fit["retrained"] == record["retrained"]
+        assert scores["chunk_accuracy"] == record["chunk_accuracy"] or \
+            np.isnan(scores["chunk_accuracy"])
+    assert by_hand.accuracy.result() == auto.summary()["final_cumulative_accuracy"]
+    assert np.isnan(make_trainer().score_chunk(X[:10], y[:10])["chunk_accuracy"])

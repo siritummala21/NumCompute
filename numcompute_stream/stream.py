@@ -3,6 +3,8 @@
 Evaluation is prequential (test-then-train): each chunk is first used to
 score the current model, which has not seen those rows yet, and only then to
 train it. So every logged accuracy is an out-of-sample number.
+``score_chunk(X, y)`` is the test step, ``fit_chunk(X, y)`` the train step,
+and ``process_chunk`` runs both and logs the result.
 
 Logged per chunk: chunk, n_samples, chunk_accuracy, cumulative_accuracy,
 rolling_accuracy, cumulative_f1, auc (binary only), chunk_error, retrained,
@@ -87,23 +89,34 @@ class StreamTrainer:
         self.n_drift_retrains_ = 0
         self._samples_seen = 0
         self._since_warning = 0
+        self._drift = False
         self.last_predictions = None
         self.last_truth = None
         return self
 
-    def _score(self, X, y):
-        """Predict the chunk and update the metrics (NaN if no tree is trained yet)."""
+    def score_chunk(self, X, y):
+        """Test step: predict the chunk and update the metrics.
+
+        Returns a dict with chunk, cumulative and rolling accuracy, macro F1,
+        AUC (binary only) and the predict time. All values are NaN while no
+        tree has been trained yet (the buffer has not filled once). Also
+        feeds the drift detector, if there is one.
+
+        Complexity: one predict on the chunk plus O(chunk + k^2) for the metrics.
+        """
+        y = check_labels(y)
         nan = float("nan")
         out = {"chunk_accuracy": nan, "chunk_error": nan, "cumulative_accuracy": nan,
                "rolling_accuracy": nan, "cumulative_f1": nan, "auc": nan,
                "predict_seconds": 0.0}
+        self._drift = False
         if not getattr(self.model, "is_fitted", True):
-            return out, None
+            return out
         start = time.perf_counter()
         try:
             y_pred = self.model.predict(X)
         except NotFittedError:
-            return out, None
+            return out
         out["predict_seconds"] = time.perf_counter() - start
         for metric in (self.accuracy, self.f1, self.confusion, self.rolling):
             metric.update(y, y_pred)
@@ -117,37 +130,32 @@ class StreamTrainer:
             self.auc.update(y, self.model.predict_proba(X)[:, 1])
             out["auc"] = self.auc.result()
         self.last_predictions, self.last_truth = y_pred, y
-        return out, y_pred
 
-    def process_chunk(self, X, y):
-        """Score the chunk, train on it and log it. Returns the log record.
-
-        An empty chunk is skipped and returns None.
-
-        Complexity: one predict and one partial_fit on the chunk, plus O(chunk + k^2)
-        for the metrics.
-        """
-        y = check_labels(y, allow_empty=True)
-        if y.shape[0] == 0:
-            return None
-        record = {"chunk": len(self.history), "n_samples": int(y.shape[0])}
-        scores, y_pred = self._score(X, y)
-        record.update(scores)
-
-        drift = False
-        if self.drift_detector is not None and y_pred is not None:
+        if self.drift_detector is not None:
             self.drift_detector.update(y, y_pred)
-            drift = self.drift_detector.drift_detected
+            self._drift = self.drift_detector.drift_detected
             # count the rows since the warning started: they show the new concept
             if self.drift_detector.state in ("warning", "drift"):
                 self._since_warning += y.shape[0]
             else:
                 self._since_warning = 0
+        return out
 
+    def fit_chunk(self, X, y):
+        """Train step: ``partial_fit`` the model on the chunk.
+
+        If the last ``score_chunk`` saw a drift, the tree is also retrained
+        straight away on the rows since the warning (``flush``). Returns a
+        dict with fit time, whether it retrained, the number of retrains and
+        the rows waiting in the buffer.
+
+        Complexity: one partial_fit (a retrain costs one tree fit on the buffer).
+        """
         tree = _final(self.model)
         start = time.perf_counter()
         self.model.partial_fit(X, y)
         retrained = bool(getattr(tree, "last_partial_fit_retrained_", False))
+        drift = getattr(self, "_drift", False)
         if drift and not retrained:
             before = tree.n_retrains_
             tree.flush(min_samples=self.drift_min_samples, last_n=self._since_warning)
@@ -156,13 +164,29 @@ class StreamTrainer:
                 self.n_drift_retrains_ += 1
         if drift:
             self._since_warning = 0
-        record["fit_seconds"] = time.perf_counter() - start
-        record["retrained"] = retrained
-        record["n_retrains"] = int(getattr(tree, "n_retrains_", 0))
-        record["buffer_count"] = int(getattr(tree, "buffer_count", 0))
+        self._drift = False
+        out = {"fit_seconds": time.perf_counter() - start, "retrained": retrained,
+               "n_retrains": int(getattr(tree, "n_retrains_", 0)),
+               "buffer_count": int(getattr(tree, "buffer_count", 0))}
         if self.drift_detector is not None:
-            record["drift"] = bool(drift)
+            out["drift"] = bool(drift)
+        return out
 
+    def process_chunk(self, X, y):
+        """Score the chunk, then train on it, then log it (test-then-train).
+
+        This is ``score_chunk`` followed by ``fit_chunk``. Returns the log
+        record; an empty chunk is skipped and returns None.
+
+        Complexity: one predict and one partial_fit on the chunk, plus O(chunk + k^2)
+        for the metrics.
+        """
+        y = check_labels(y, allow_empty=True)
+        if y.shape[0] == 0:
+            return None
+        record = {"chunk": len(self.history), "n_samples": int(y.shape[0])}
+        record.update(self.score_chunk(X, y))
+        record.update(self.fit_chunk(X, y))
         self._samples_seen += y.shape[0]
         record["samples_seen"] = self._samples_seen
         memory = getattr(self.model, "memory_bytes", None)
@@ -171,7 +195,8 @@ class StreamTrainer:
         if self.log_every and record["chunk"] % self.log_every == 0:
             logger.info("[%s] chunk %d | acc=%.3f cum=%.3f | retrained=%s | mem=%d B",
                         self.name, record["chunk"], record["chunk_accuracy"],
-                        record["cumulative_accuracy"], retrained, record["memory_bytes"])
+                        record["cumulative_accuracy"], record["retrained"],
+                        record["memory_bytes"])
         return record
 
     def run(self, stream, max_chunks=None):

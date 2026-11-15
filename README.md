@@ -141,7 +141,7 @@ is wrong.
 | `metrics` | `Accuracy`, `Precision`, `Recall`, `F1Score`, `StreamingConfusionMatrix`, `StreamingAUC`, `RollingMetric` | `update()`, `result()`, `reset()` |
 | `tree` | `DecisionTreeClassifier` / `DecisionTree(max_depth, min_samples_split, min_samples_leaf, max_features, criterion, buffer_size)` | buffered retraining (below) |
 | `pipeline` | `Pipeline`, `ColumnTransformer` | each step updates on the chunk, then transforms it |
-| `stream` | `StreamTrainer.process_chunk`, `run`, `summary`, `to_csv` | logs chunk, cumulative and rolling accuracy, F1, retrains, times and memory |
+| `stream` | `StreamTrainer.score_chunk` (test), `fit_chunk` (train), `process_chunk` (both + log), `run`, `summary`, `to_csv` | logs chunk, cumulative and rolling accuracy, F1, retrains, times and memory |
 | `drift` | `DDM` | watches the error rate per chunk |
 | `visualise` | `plot_metric_over_time`, `compare_models`, `plot_predictions_vs_ground_truth`, `plot_confusion_matrix`, `plot_feature_importances`, `plot_stream_dashboard` | each takes `ax=`, `save_path=`, `show=` |
 
@@ -209,7 +209,7 @@ drifting streams, chunks of 100, drift at chunk 30:
 ## Running the tests
 
 ```bash
-python -m pytest            # 253 tests
+python -m pytest            # 254 tests
 ```
 
 | Test file | Tests | What it checks |
@@ -220,7 +220,7 @@ python -m pytest            # 253 tests
 | test_stream_metrics.py | 13 | streamed metrics against batch values, AUC, rolling window |
 | test_stream_tree.py | 27 | impurity, split search vs loop, buffering, edge cases, parameter checks |
 | test_stream_pipeline.py | 8 | pipelines, mixed columns, new categories, fit-only and transform-only steps |
-| test_stream_trainer.py | 10 | test-then-train log, DDM, plots |
+| test_stream_trainer.py | 11 | test-then-train log, score_chunk/fit_chunk, DDM, plots |
 | test_stream_matches_numcompute.py | 8 | subclassing and equality with the numcompute functions |
 | test_stream_errors_and_options.py | 31 | every error message and the less common options |
 | test_numcompute_feedback_fixes.py | 14 | the 2.1 feedback cases |
